@@ -1,0 +1,1594 @@
+if (!window.design7Loaded) {
+    window.design7Loaded = true;
+
+    (function() {
+        "use strict";
+
+        var modalBasePrice = 0;
+        var modalCurrentQty = 1;
+        var userRating = 5;
+        var selectedCrmId = '';
+        var selectedPrice = 0;
+        var selectedQty = 1;
+        var isDiscountMode = false;
+        window.catalogSwipers = {};
+        var isReviewsVisible = false;
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            var map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        function sanitizeInput(value) {
+            if (!value) return '';
+            var noTags = value.replace(/<\/?[^>]+(>|$)/g, "");
+            return escapeHtml(noTags).trim();
+        }
+
+        function setPhoneMask(inputElement) {
+            if (!inputElement) return;
+
+            inputElement.addEventListener('input', function(e) {
+                const oldValue = e.target.value;
+                let value = oldValue.replace(/\D/g, '');
+                let maskedValue = '';
+                if (!value.startsWith('38')) {
+                    if (value.length < 2) {
+                        value = '38';
+                    } else {
+                        value = '38' + value;
+                        value = value.substring(0, 12);
+                    }
+                }
+                if (value.length > 2 && value.length < 4 && value.substring(2, 3) !== '0') {
+                    value = value.substring(0, 2) + '0' + value.substring(2);
+                }
+
+                value = value.substring(0, 12);
+
+                if (value.length >= 2) {
+                    maskedValue = '+' + value.substring(0, 2);
+                }
+                if (value.length > 2) {
+                    maskedValue += ' (' + value.substring(2, 5);
+                }
+                if (value.length > 5) {
+                    maskedValue += ') ' + value.substring(5, 8);
+                }
+                if (value.length > 8) {
+                    maskedValue += '-' + value.substring(8, 10);
+                }
+                if (value.length > 10) {
+                    maskedValue += '-' + value.substring(10, 12);
+                }
+
+                e.target.value = maskedValue;
+
+                const newCursor = e.target.value.length;
+                e.target.setSelectionRange(newCursor, newCursor);
+            });
+
+            if (!inputElement.value.replace(/\D/g, '')) {
+                inputElement.value = '+38 (';
+            }
+
+            inputElement.addEventListener('blur', function(e) {
+                let value = e.target.value.replace(/\D/g, '');
+                if (value.length < 4) {
+                    e.target.value = '+38 (';
+                }
+            });
+        }
+
+        document.addEventListener('gesturestart', function(e) {
+            e.preventDefault();
+        });
+
+        document.addEventListener("DOMContentLoaded", function() {
+            initSwiperOnScroll('.hero-swiper.mainSwiper', 3000);
+            initSwiperOnScroll('.orderSwiper', 3200);
+            if (document.querySelector('.specSwiper')) initSwiperOnScroll('.specSwiper', 3500);
+
+            document.querySelectorAll('.catalogSwiper').forEach((el, idx) => {
+                const s = initSwiperOnScroll('.catalog-swiper-' + idx, 3500 + (idx * 500));
+                if (s) window.catalogSwipers[idx] = s;
+            });
+            window.addEventListener('scroll', checkStickyBar);
+            window.addEventListener('resize', checkStickyBar);
+            checkStickyBar();
+            setTimeout(triggerFomo, 5000);
+            initDefaultVariantData();
+            const proxyPhone = document.getElementById('proxy-phone');
+            const modalPhone = document.getElementById('m-phone-input');
+
+            if (proxyPhone) setPhoneMask(proxyPhone);
+            if (modalPhone) setPhoneMask(modalPhone);
+
+            setTimeout(initSmartLiveFeed, 1000);
+        });
+
+        // Слушатель успешной отправки формы CF7 для редиректа
+        document.addEventListener('wpcf7mailsent', function(event) {
+            var thanksElement = document.querySelector('.thanks');
+            if (thanksElement) {
+                var redirectUrl = thanksElement.getAttribute('data-thankyou-page');
+                if (redirectUrl) {
+                    window.location.href = redirectUrl;
+                }
+            }
+        }, false);
+
+        function initSmartLiveFeed() {
+            var data = window.design7_Data;
+
+            if (typeof data === 'undefined') {
+                setTimeout(initSmartLiveFeed, 1000);
+                return;
+            }
+            if (!data.serverReviews || data.serverReviews.length === 0) {
+                return;
+            }
+
+            var reviewIndex = 0;
+            var feedInterval;
+
+            var observer = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry) {
+                    isReviewsVisible = entry.isIntersecting;
+                });
+            }, {
+                threshold: 0.1
+            });
+
+            var target = document.querySelector('.trust-dashboard') || document.getElementById('reviews-wrapper');
+            if (target) observer.observe(target);
+
+            feedInterval = setInterval(function() {
+                if (isReviewsVisible) {
+                    var currentReviews = window.design7_Data.serverReviews;
+
+                    if (reviewIndex < currentReviews.length) {
+                        addReviewToFeed(currentReviews[reviewIndex], 'live');
+                        reviewIndex++;
+                    } else {
+                        clearInterval(feedInterval);
+                        if (target) observer.unobserve(target);
+                    }
+                }
+            }, 4000);
+        }
+
+        function addReviewToFeed(data, type) {
+            var list = document.getElementById('reviewsList');
+            if (!list) return;
+
+            var safeName = escapeHtml(data.name);
+            var safeText = escapeHtml(data.text);
+            
+            var initials = safeName ? safeName.substring(0, 2).toUpperCase() : '??';
+            var timeString = (type === 'user') ? "Щойно" : "3 хв тому";
+            var rating = data.rating || 5;
+            var likesCount = (type === 'user') ? 0 : Math.floor(Math.random() * 10) + 2;
+
+            var starsHtml = '';
+            var starImg = '<img src="/wp-content/themes/tovar-theme/img/emoji/star.png" class="emoji-icon emoji-star">';
+            for (var i = 0; i < 5; i++) {
+                starsHtml += (i < rating) ? starImg : '';
+            }
+
+            var badgeHtml = '';
+            var animClass = '';
+
+            if (type === 'user') {
+                badgeHtml = '<div class="ar-verified" style="color:#00C853; border-color:#00C853; background:rgba(0,200,83,0.1);"><img src="/wp-content/themes/tovar-theme/img/emoji/check.png" class="emoji-icon emoji-check"> ВАШ ВІДГУК</div>';
+                animClass = 'new-review-highlight-green';
+            } else if (type === 'live') {
+                badgeHtml = '<span class="new-badge"><img src="/wp-content/themes/tovar-theme/img/emoji/lightning.png" class="emoji-icon emoji-light"> НОВИЙ</span>';
+                animClass = 'new-review-highlight-blue';
+            } else {
+                badgeHtml = '<div class="ar-verified"><img src="/wp-content/themes/tovar-theme/img/emoji/check.png" class="emoji-icon emoji-check"> ПІДТВЕРДЖЕНО</div>';
+            }
+
+            var photoHtml = '';
+            if (data.img) {
+                var safeImg = escapeHtml(data.img); 
+                photoHtml = '<div class="ar-photo-grid"><img src="' + safeImg + '" onclick="openLightbox(this.src)"></div>';
+            }
+
+            var html = `
+            <div class="adv-review-card ${animClass}">
+                <div class="ar-header">
+                    <div class="ar-avatar" style="background: ${data.color || '#FF5F1F'};">${initials}</div>
+                    <div class="ar-info">
+                        <div class="ar-name">${safeName}</div>
+                        <div class="ar-stars">${starsHtml}</div>
+                    </div>
+                    ${badgeHtml}
+                </div>
+                <div class="ar-content">
+                    <p class="ar-text">${safeText}</p>
+                    ${photoHtml}
+                </div>
+                <div class="ar-footer">
+                    <span class="ar-date">${timeString}</span>
+                    <div class="ar-actions">
+                        <button class="reaction-btn" onclick="toggleReaction(this, 'like')">
+                            <img src="/wp-content/themes/tovar-theme/img/emoji/like.png" class="emoji-icon emoji-like"> <span>${likesCount}</span>
+                        </button>
+                        <button class="reaction-btn" onclick="toggleReaction(this, 'dislike')">
+                            <img src="/wp-content/themes/tovar-theme/img/emoji/dislike.png" class="emoji-icon emoji-dislike"> <span>0</span>
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+
+            list.insertAdjacentHTML('afterbegin', html);
+
+            if (type === 'user') {
+                var newCard = list.firstElementChild;
+                if (newCard) newCard.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center'
+                });
+            }
+        }
+
+        function initDefaultVariantData() {
+            var firstPriceEl = document.querySelector('.p-main');
+            var firstIdEl = document.getElementById('real-product-id');
+
+            if (firstPriceEl) {
+                var cleanPrice = parseInt(firstPriceEl.innerText.replace(/[^0-9]/g, '')) || 0;
+                selectedPrice = cleanPrice;
+            }
+            if (firstIdEl) {
+                selectedCrmId = firstIdEl.value;
+            }
+            if (document.querySelector('.qty-card-item')) {
+                isDiscountMode = true;
+            }
+        }
+
+        function initSwiperOnScroll(selector, delay) {
+            const element = document.querySelector(selector);
+            if (!element) return null;
+
+            var slides = element.querySelectorAll('.swiper-slide').length;
+            var loopEnabled = slides > 1;
+
+            const swiper = new Swiper(selector, {
+                loop: loopEnabled,
+                effect: 'fade',
+                autoHeight: true,
+                autoplay: {
+                    delay: delay,
+                    disableOnInteraction: false
+                },
+                navigation: {
+                    nextEl: selector + ' .swiper-button-next',
+                    prevEl: selector + ' .swiper-button-prev'
+                }
+            });
+            swiper.autoplay.stop();
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) swiper.autoplay.start();
+                    else swiper.autoplay.stop();
+                });
+            }, {
+                threshold: 0.3
+            });
+            observer.observe(element);
+            return swiper;
+        }
+
+        function scrollToOrder() {
+            const el = document.getElementById('order-card');
+            if (el) el.scrollIntoView({
+                behavior: 'smooth'
+            });
+        }
+
+        function selectVariant(name, price, crmId) {
+            const txt = document.getElementById('selected-variant-text');
+            if (txt) txt.innerText = name;
+
+            selectedCrmId = crmId;
+            selectedPrice = price;
+            selectedQty = 1;
+            isDiscountMode = false;
+
+            var baseOld = (typeof window.design7_Data !== 'undefined') ? window.design7_Data.oldPrice : 0;
+            var discountPercent = 0;
+
+            if (baseOld > price) {
+                discountPercent = Math.round(((baseOld - price) / baseOld) * 100);
+            } else {
+                baseOld = Math.floor(price * 1.2);
+                discountPercent = 20;
+            }
+
+            updatePriceDOM(price, baseOld, discountPercent);
+
+            const dd = document.getElementById('variant-dropdown-wrapper');
+            if (dd) dd.classList.remove('open');
+        }
+
+        function setQty(qty, unitPrice, discountPercent, el) {
+            if (el) {
+                document.querySelectorAll('.qty-card-item').forEach(o => o.classList.remove('active'));
+                el.classList.add('active');
+            }
+
+            var total = unitPrice * qty;
+            var baseOld = (typeof window.design7_Data !== 'undefined') ? window.design7_Data.oldPrice : (unitPrice * 1.2);
+            var totalOld = baseOld * qty;
+
+            selectedQty = qty;
+            selectedPrice = total;
+            isDiscountMode = true;
+            selectedCrmId = '';
+
+            updatePriceDOM(total, totalOld, discountPercent);
+        }
+
+        function setVariant(name, price, crmId, el, scroll) {
+            selectVariant(name, price, crmId);
+            if (scroll) scrollToOrder();
+        }
+
+        function toggleVariantDropdown() {
+            const dd = document.getElementById('variant-dropdown-wrapper');
+            if (dd) dd.classList.toggle('open');
+        }
+
+        function updatePriceDOM(price, oldPrice, discount) {
+            var currency = (typeof window.design7_Data !== 'undefined') ? window.design7_Data.currency : '₴';
+            const orderTotal = document.getElementById('order-total');
+            const orderOld = document.getElementById('order-old-total');
+            const orderDisc = document.getElementById('order-discount');
+            const sbPrice = document.querySelector('.sb-price');
+
+            if (orderTotal) orderTotal.innerText = price + currency;
+            if (sbPrice) sbPrice.innerText = price + currency;
+
+            if (orderOld) {
+                orderOld.innerText = oldPrice + currency;
+                orderOld.parentElement.style.display = 'flex';
+            }
+            if (orderDisc) {
+                if (discount > 0) {
+                    orderDisc.innerText = '-' + discount + '%';
+                    orderDisc.style.display = 'inline-block';
+                } else {
+                    orderDisc.style.display = 'none';
+                }
+            }
+        }
+
+        function submitOrder() {
+            if (!selectedQty) selectedQty = 1;
+
+            var pName = sanitizeInput(document.getElementById('proxy-name').value);
+            var pPhone = document.getElementById('proxy-phone').value.replace(/\D/g, '');
+
+            if (!pPhone || pPhone.length < 5) {
+                alert('Введіть коректний номер телефону');
+                return;
+            }
+            if (pPhone.length < 12) {
+                alert('Номер телефону має містити 10 цифр (без +38)');
+                return;
+            }
+
+            var cf7Form = document.querySelector('.wpcf7-form');
+
+            if (!cf7Form) {
+                console.error('CRITICAL: CF7 Form not found!');
+                alert('Помилка: Форма не знайдена (код 404-F)');
+                return;
+            }
+
+            var realName = cf7Form.querySelector('input[name="username"]') || cf7Form.querySelector('input[name="your-name"]');
+            var realPhone = cf7Form.querySelector('input[name="phone"]') || cf7Form.querySelector('input[name="your-phone"]');
+
+            if (realName) realName.value = pName;
+            if (realPhone) realPhone.value = pPhone;
+
+            var forceUpdateAll = function(form, name, value) {
+                var inputs = form.querySelectorAll('[name="' + name + '"]');
+                if (inputs.length > 0) {
+                    inputs.forEach(function(input) {
+                        input.value = value;
+                    });
+                } else {
+                    var input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = name;
+                    input.value = value;
+                    form.appendChild(input);
+                }
+            };
+
+            forceUpdateAll(cf7Form, 'quantity', selectedQty);
+
+            forceUpdateAll(cf7Form, 'selected_quantity', selectedQty);
+            if (isDiscountMode) {
+                forceUpdateAll(cf7Form, 'discount', selectedPrice);
+                forceUpdateAll(cf7Form, 'item_price', selectedPrice);
+            } else {
+                if (selectedCrmId) forceUpdateAll(cf7Form, 'product_variant', selectedCrmId);
+                if (selectedPrice) forceUpdateAll(cf7Form, 'variant_price', selectedPrice);
+                forceUpdateAll(cf7Form, 'item_price', selectedPrice);
+            }
+
+            var realSubmit = cf7Form.querySelector('button.button-submit') || cf7Form.querySelector('input[type="submit"]');
+
+            if (realSubmit) {
+                const btn = document.querySelector('#order-card .btn-liquid-text');
+                if (btn) {
+                    btn.style.opacity = '0.7';
+                    if (btn.querySelector('.blt-text')) btn.querySelector('.blt-text').innerText = 'ОБРОБКА...';
+                }
+                realSubmit.click();
+            } else {
+                var newSubmit = document.createElement('input');
+                newSubmit.type = 'submit';
+                newSubmit.style.display = 'none';
+                cf7Form.appendChild(newSubmit);
+                newSubmit.click();
+            }
+        }
+
+        function openCatalogModal(id, price, oldPrice, title, imgUrl) {
+            const modal = document.getElementById('catalog-modal');
+            document.getElementById('m-title').innerText = title;
+            document.getElementById('m-img').src = escapeHtml(imgUrl);
+
+            modalBasePrice = price;
+            modalCurrentQty = 1;
+
+            const oldPriceRow = document.getElementById('m-old-price-row');
+            const badgeSpan = document.getElementById('m-badge');
+
+            if (oldPrice > price) {
+                var discount = Math.round(((oldPrice - price) / oldPrice) * 100);
+                modal.dataset.baseOldPrice = oldPrice;
+                if (badgeSpan) badgeSpan.innerText = '-' + discount + '%';
+                if (oldPriceRow) oldPriceRow.style.display = 'flex';
+            } else {
+                if (oldPriceRow) oldPriceRow.style.display = 'none';
+                modal.dataset.baseOldPrice = 0;
+            }
+
+            modal.dataset.productId = id;
+            modal.dataset.productName = title;
+            updateModalPrice();
+            modal.classList.add('active');
+        }
+
+        function closeCatalogModal() {
+            document.getElementById('catalog-modal').classList.remove('active');
+        }
+
+        function changeModalQty(delta) {
+            modalCurrentQty += delta;
+            if (modalCurrentQty < 1) modalCurrentQty = 1;
+            updateModalPrice();
+        }
+
+        function updateModalPrice() {
+            var currency = (typeof window.design7_Data !== 'undefined') ? window.design7_Data.currency : '₴';
+            var total = modalBasePrice * modalCurrentQty;
+            document.getElementById('m-price').innerText = total + currency;
+            document.getElementById('m-qty').innerText = modalCurrentQty;
+
+            const modal = document.getElementById('catalog-modal');
+            var baseOld = parseFloat(modal.dataset.baseOldPrice);
+            if (baseOld > 0) {
+                document.getElementById('m-old-price').innerText = (baseOld * modalCurrentQty) + currency;
+            }
+        }
+		
+var isOrderProcessing = false;
+
+function submitModalOrder() {
+    if (isOrderProcessing) {
+        return false; 
+    }
+
+    var nameInput = document.getElementById('m-name-input');
+    var phoneInput = document.getElementById('m-phone-input');
+    var name = nameInput ? sanitizeInput(nameInput.value) : '';
+    var phone = phoneInput ? phoneInput.value.replace(/\D/g, '') : '';
+    
+    if (!phone || phone.length < 5) {
+        alert('Введіть номер телефону!');
+        return;
+    }
+    if (phone.length < 10) { 
+        alert('Номер телефону має містити 10 цифр');
+        return;
+    }
+
+    isOrderProcessing = true;
+	
+    var btn = document.querySelector('.proxy-form .btn-liquid-text');
+    if (btn) {
+        btn.style.opacity = '0.7';
+        btn.style.pointerEvents = 'none'; 
+        var span = btn.querySelector('.blt-text');
+        if (span) span.innerText = 'ОБРОБКА...';
+    }
+
+    var allForms = document.querySelectorAll('.wpcf7-form');
+    var cf7Form = null;
+
+    allForms.forEach(function(f) {
+        if (f.querySelector('[name="modal_quantity"]')) cf7Form = f;
+    });
+    if (!cf7Form && allForms.length > 1) cf7Form = allForms[1];
+    if (!cf7Form) cf7Form = document.querySelector('.wpcf7-form');
+
+    if (cf7Form) {
+        var realName = cf7Form.querySelector('input[name="username"]') || cf7Form.querySelector('input[name="your-name"]');
+        var realPhone = cf7Form.querySelector('input[name="phone"]') || cf7Form.querySelector('input[name="your-phone"]');
+
+        if (realName) realName.value = name;
+        if (realPhone) realPhone.value = phone;
+        if (!cf7Form.querySelector('input[name="_is_modal"]')) {
+            var modalInput = document.createElement('input');
+            modalInput.type = 'hidden';
+            modalInput.name = '_is_modal';
+            modalInput.value = '1';
+            cf7Form.appendChild(modalInput);
+        } else {
+            cf7Form.querySelector('input[name="_is_modal"]').value = '1';
+        }
+
+        var forceUpdateAll = function(form, name, value) {
+            var inputs = form.querySelectorAll('[name="' + name + '"]');
+            if (inputs.length > 0) {
+                inputs.forEach(function(input) { input.value = value; });
+            } else {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                input.value = value;
+                form.appendChild(input);
+            }
+        };
+
+        var totalModalPrice = modalBasePrice * modalCurrentQty;
+        var modalEl = document.getElementById('catalog-modal');
+
+        forceUpdateAll(cf7Form, 'product_id', modalEl.dataset.productId);
+        forceUpdateAll(cf7Form, 'product_name', modalEl.dataset.productName);
+        forceUpdateAll(cf7Form, 'product_price', totalModalPrice);
+        forceUpdateAll(cf7Form, 'modal_quantity', modalCurrentQty);
+        forceUpdateAll(cf7Form, 'quantity', modalCurrentQty);
+        forceUpdateAll(cf7Form, 'product_variant', '');
+        forceUpdateAll(cf7Form, 'discount', '');
+
+        var realSubmit = cf7Form.querySelector('input[type="submit"]:not([name="main_submit_trap"])') 
+                      || cf7Form.querySelector('button[type="submit"]:not([name="main_submit_trap"])')
+                      || cf7Form.querySelector('.wpcf7-submit');
+
+        if (realSubmit) {
+            realSubmit.click();
+        } else {
+            var newSubmit = document.createElement('input');
+            newSubmit.type = 'submit';
+            newSubmit.style.display = 'none';
+            cf7Form.appendChild(newSubmit);
+            newSubmit.click();
+        }
+        
+    } else {
+        alert("Помилка: Форма не знайдена. Перезавантажте сторінку.");
+        isOrderProcessing = false;
+        if (btn) {
+            btn.style.opacity = '1';
+            btn.style.pointerEvents = 'auto';
+            var span = btn.querySelector('.blt-text');
+            if (span) span.innerText = 'ЗАМОВИТИ';
+        }
+    }
+}
+
+        function setHiddenField(form, name, value) {
+            var input = form.querySelector(`input[name="${name}"]`);
+            if (!input) {
+                input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                form.appendChild(input);
+            }
+            input.value = value;
+        }
+
+        function toggleCatDesc(btn, index) {
+            const content = btn.nextElementSibling;
+            content.classList.toggle('open');
+            if (content.classList.contains('open')) {
+                btn.classList.add('active');
+                btn.querySelector('span:first-child').innerText = 'Згорнути опис';
+                if (window.catalogSwipers[index]) window.catalogSwipers[index].autoplay.stop();
+            } else {
+                btn.classList.remove('active');
+                btn.querySelector('span:first-child').innerText = 'Читати опис';
+                if (window.catalogSwipers[index]) window.catalogSwipers[index].autoplay.start();
+            }
+        }
+
+        function checkStickyBar() {
+            const stickyBar = document.getElementById('sticky-bar');
+            const triggerEl = document.querySelector('.hero-content-pad');
+            const hideEl = document.getElementById('order-card');
+
+            if (!triggerEl || !hideEl || !stickyBar) return;
+
+            const scrollY = window.scrollY || window.pageYOffset;
+            const triggerPos = triggerEl.offsetTop + triggerEl.offsetHeight;
+            const hidePos = hideEl.offsetTop;
+
+            if (scrollY > triggerPos && scrollY < (hidePos - 300)) {
+                stickyBar.classList.add('visible');
+            } else {
+                stickyBar.classList.remove('visible');
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            const wrap = document.getElementById('variant-dropdown-wrapper');
+            if (wrap && !wrap.contains(e.target)) {
+                wrap.classList.remove('open');
+            }
+        });
+
+        var stockVal = 9;
+        if (document.getElementById('stockNum')) {
+            stockVal = parseInt(document.getElementById('stockNum').innerText) || 9;
+        }
+        setInterval(() => {
+            const sNum = document.getElementById('stockNum');
+            const sFill = document.getElementById('stockFill');
+            if (sNum && stockVal > 2) {
+                stockVal--;
+                sNum.innerText = `${stockVal} шт`;
+                if (sFill) sFill.style.width = (stockVal * 10) + '%';
+            }
+        }, 12000);
+
+        var fomoNames = [
+            "Саша", "Марина", "Андрій", "Олена", "Сергій",
+            "Таня", "Ігор", "Наталя", "Діма", "Віка",
+            "Артем", "Юлія", "Максим", "Света", "Микола",
+            "Ірина", "Володя", "Оксана", "Богдан", "Даря"
+        ];
+
+        var fomoCities = [
+            "м. Київ", "Харків", "м. Одеса", "Дніпро",
+            "м. Львів", "Вінниця",
+            "Полтава", "Черкаси",
+            "Житомир", "м. Суми", "м. Рівне",
+            "м. Луцьк", "Ужгород"
+        ];
+
+        function triggerFomo() {
+            const popup = document.getElementById('fomo-popup');
+            const fmName = document.getElementById('fm-name');
+            if (!popup) return;
+
+            const reviewsSection = document.getElementById('reviews-wrapper');
+            if (reviewsSection && (window.scrollY + window.innerHeight) > reviewsSection.offsetTop + 100) {
+                setTimeout(triggerFomo, 5000);
+                return;
+            }
+            if (popup.classList.contains('success-toast')) {
+                setTimeout(triggerFomo, 5000);
+                return;
+            }
+
+            const uName = fomoNames[Math.floor(Math.random() * fomoNames.length)];
+            const uCity = fomoCities[Math.floor(Math.random() * fomoCities.length)];
+            if (fmName) fmName.innerText = uName + " (" + uCity + ")";
+
+            popup.classList.add('show');
+
+            setTimeout(() => {
+                popup.classList.remove('show');
+            }, 4000);
+
+            let randomDelay = Math.floor(Math.random() * 20000) + 6000;
+
+            setTimeout(triggerFomo, randomDelay);
+        }
+
+        function toggleReaction(btn, type) {
+            var countSpan = btn.querySelector('span');
+            var count = parseInt(countSpan.innerText);
+            var isActive = (type === 'like') ? btn.classList.contains('active-like') : btn.classList.contains('active-dislike');
+
+            if (isActive) {
+                btn.classList.remove(type === 'like' ? 'active-like' : 'active-dislike');
+                countSpan.innerText = count - 1;
+            } else {
+                btn.classList.add(type === 'like' ? 'active-like' : 'active-dislike');
+                countSpan.innerText = count + 1;
+                var sibling = (type === 'like') ? btn.nextElementSibling : btn.previousElementSibling;
+                if (sibling && (sibling.classList.contains('active-like') || sibling.classList.contains('active-dislike'))) {
+                    sibling.classList.remove('active-like', 'active-dislike');
+                    var sSpan = sibling.querySelector('span');
+                    sSpan.innerText = parseInt(sSpan.innerText) - 1;
+                }
+            }
+        }
+
+        function toggleReviewForm() {
+            const f = document.getElementById('review-form-wrap');
+            if (f) f.classList.toggle('open');
+        }
+
+        function setStars(n) {
+            userRating = n;
+            document.querySelectorAll('.star-s').forEach((s, i) => {
+                if (i < n) s.classList.add('selected');
+                else s.classList.remove('selected');
+            });
+        }
+
+        function submitReview() {
+            let reviewCount = localStorage.getItem('user_reviews_count');
+            if (reviewCount && parseInt(reviewCount) >= 2) {
+                alert('Ви вже залишили максимальну кількість відгуків (2). Дякуємо!');
+                return;
+            }
+
+            const nameInput = document.getElementById('r-name');
+            const textInput = document.getElementById('r-text');
+            const rawName = nameInput.value.trim();
+            const rawText = textInput.value.trim();
+
+            if (!rawName || !rawText) {
+                alert('Напишіть відгук!');
+                return;
+            }
+            if (rawName.length > 15) {
+                alert('Ім\'я занадто довге!');
+                return;
+            }
+            if (rawText.length > 130) {
+                alert('Текст відгуку занадто довгий!');
+                return;
+            }
+
+            const cleanName = escapeHtml(rawName);
+            const cleanText = escapeHtml(rawText);
+            
+            const userReviewData = {
+                name: cleanName,
+                text: cleanText,
+                rating: userRating,
+                color: '#FF5F1F',
+                img: ''
+            };
+
+            addReviewToFeed(userReviewData, 'user');
+            localStorage.setItem('user_reviews_count', (parseInt(reviewCount || 0) + 1));
+
+            nameInput.value = '';
+            textInput.value = '';
+            setStars(5);
+            document.getElementById('review-form-wrap').classList.remove('open');
+
+            const popup = document.getElementById('fomo-popup');
+            if (popup) {
+                const icon = popup.querySelector('.fomo-icon');
+                const title = document.getElementById('fm-name');
+                const desc = document.getElementById('fm-desc');
+                const time = popup.querySelector('.fomo-time');
+
+                const checkIcon = '<img src="/wp-content/themes/tovar-theme/img/emoji/check.png" class="emoji-icon" style="width:24px;height:24px;">';
+                const cartIcon = '<img src="/wp-content/themes/tovar-theme/img/emoji/shop.png" class="emoji-icon" style="width:24px;height:24px;">';
+
+                popup.classList.add('success-toast');
+                if (icon) icon.innerHTML = checkIcon;
+                if (title) title.innerText = 'Ваш відгук';
+                if (desc) desc.innerText = 'Успішно опубліковано!';
+                if (time) time.innerText = 'Зараз';
+                popup.classList.add('show');
+
+                setTimeout(() => {
+                    popup.classList.remove('show');
+                    setTimeout(() => {
+                        popup.classList.remove('success-toast');
+                        if (icon) icon.innerHTML = cartIcon;
+                    }, 500);
+                }, 3500);
+            }
+        }
+
+        function openLightbox(src) {
+            document.getElementById('lb-img').src = escapeHtml(src);
+            document.getElementById('lightbox').classList.add('active');
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('active');
+        }
+
+        window.setPhoneMask = setPhoneMask;
+        window.sanitizeInput = sanitizeInput;
+        window.scrollToOrder = scrollToOrder;
+        window.selectVariant = selectVariant;
+        window.setQty = setQty;
+        window.setVariant = setVariant;
+        window.toggleVariantDropdown = toggleVariantDropdown;
+        window.submitOrder = submitOrder;
+        window.openCatalogModal = openCatalogModal;
+        window.closeCatalogModal = closeCatalogModal;
+        window.changeModalQty = changeModalQty;
+        window.submitModalOrder = submitModalOrder;
+        window.setHiddenField = setHiddenField;
+        window.toggleCatDesc = toggleCatDesc;
+        window.triggerFomo = triggerFomo;
+        window.toggleReaction = toggleReaction;
+        window.escapeHtml = escapeHtml;
+        window.toggleReviewForm = toggleReviewForm;
+        window.setStars = setStars;
+        window.submitReview = submitReview;
+        window.openLightbox = openLightbox;
+        window.closeLightbox = closeLightbox;
+    })();
+}
+
+(function() {
+    try {
+        const CONS_START_DELAY = 3000;
+        let idleTimer = null;
+        let isChatStarted = false;
+
+        const MANAGERS = [{
+            name: "Олександр",
+            gender: "m",
+            img: "https://ui-avatars.com/api/?name=Alex&background=00E5FF&color=fff&size=128"
+        }, {
+            name: "Ірина",
+            gender: "f",
+            img: "https://ui-avatars.com/api/?name=Irina&background=FF4081&color=fff&size=128"
+        }, {
+            name: "Максим",
+            gender: "m",
+            img: "https://ui-avatars.com/api/?name=Max&background=FF9100&color=fff&size=128"
+        }];
+        let currentManager = MANAGERS[Math.floor(Math.random() * MANAGERS.length)];
+
+        function t(m, f) {
+            return currentManager.gender === 'm' ? m : f;
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            var map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        const START_PHRASE_MAP = {
+            "root_scarce": "увага! залишилось 3 шт...",
+            "root_discount": "маю для вас персональну знижку...",
+            "root_speed": "машина на пошту виїжджає...",
+            "root_trust": "це важливо! хвилюєтесь?",
+            "root_lazy": "скажіть чесно, вам ліньки заповнювати форму?",
+            "root_just_look": "просто дивитесь? є акція...",
+            "root_compare": "знайшли дешевше?"
+        };
+
+        const TRIGGER_TEXTS = [
+            "є питаннячка?", "хочу підказати", "це акція", "особиста пропозиція"
+        ];
+
+        const FAQ_CHIPS = [{
+            label: "🚛 Доставка",
+            reply: "укрпошта: 40+ грн. нова пошта: 90+ грн. ми самі пакуємо, тому ви не платите за коробки пошти! 👌"
+        }, {
+            label: "💳 Оплата",
+            reply: "працюємо без ризиків. <b>накладений платіж</b> (оплата при отриманні). спочатку дивитесь, потім платите."
+        }, {
+            label: "📝 Написати",
+            reply: `я ${t('зробив','зробила')} ці кнопки для вашої зручності, щоб вам не доводилось вводити текст вручну 😉`
+        }];
+
+        const DIALOG_DB = {
+            "root_scarce": {
+                msg: `привіт) я ${currentManager.name}, старший менеджер. хотів попередити: їх залишилось 3 шт на складі.`,
+                btns: [{
+                    txt: "Встигаю замовити?",
+                    go: "step_check"
+                }, {
+                    txt: "А коли нова поставка?",
+                    go: "step_later"
+                }]
+            },
+            "root_discount": {
+                msg: `вітаю! це ${currentManager.name}. підказати по ціні?`,
+                btns: [{
+                    txt: "Є знижка?",
+                    go: "step_disc"
+                }, {
+                    txt: "Ціна актуальна?",
+                    go: "step_price"
+                }]
+            },
+            "root_speed": {
+                msg: `добрий день! у нас машина на нову пошту виїжджає через 40 хв. якщо зараз оформимо — завтра посилка буде у вас.`,
+                btns: [{
+                    txt: "Встигаємо?",
+                    go: "step_fast"
+                }, {
+                    txt: "Мені не горить",
+                    go: "step_slow"
+                }]
+            },
+            "root_trust": {
+                msg: `вітаю! бачу, ви у нас вперше. хвилюєтесь щодо якості чи оплати?`,
+                btns: [{
+                    txt: "Так, є сумніви",
+                    go: "step_guar"
+                }, {
+                    txt: "Все норм",
+                    go: "step_orig"
+                }]
+            },
+            "root_lazy": {
+                msg: `вітаю! 👋 скажіть чесно, вам теж ліньки заповнювати ці форми доставки? давайте я все зроблю за вас?`,
+                btns: [{
+                    txt: "Так, ліньки",
+                    go: "step_lazy_yes"
+                }, {
+                    txt: "Я сам впораюсь",
+                    go: "step_lazy_no"
+                }]
+            },
+            "root_just_look": {
+                msg: `ок, оглядайся. до речі, знаєш про акцію на цей товар?`,
+                btns: [{
+                    txt: "Ні, розкажіть",
+                    go: "step_disc"
+                }, {
+                    txt: "Все добре",
+                    go: "edu_trust_start"
+                }]
+            },
+            "root_compare": {
+                msg: `привіт. чесно кажучи, я бачу, що ви знайшли дешевше. що не так з нашою ціною?`,
+                btns: [{
+                    txt: "Так, ціна зависока",
+                    go: "step_comp_price"
+                }, {
+                    txt: "Я порівнюю якість",
+                    go: "step_comp_quality"
+                }]
+            },
+
+            "step_check": {
+                msg: `сек, відкрию базу...<br>так, є! але мало, всього 3 шт залишилось з цієї партії.`,
+                btns: [{
+                    txt: "Бронюйте!",
+                    go: "fin_reserve"
+                }, {
+                    txt: "Я подумаю",
+                    go: "step_think"
+                }]
+            },
+            "step_later": {
+                msg: `наступна поставка через 2 тижні і ціна буде вища на 15%. раджу брати зараз, поки стара ціна.`,
+                btns: [{
+                    txt: "Тоді беру",
+                    go: "fin_reserve"
+                }, {
+                    txt: "Почекаю",
+                    go: "edu_trust_start"
+                }]
+            },
+            "step_think": {
+                msg: `хм, ну тут таке діло. що вас турбує найбільше: ціна чи час?`,
+                btns: [{
+                    txt: "Час",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Ціна",
+                    go: "step_disc"
+                }, {
+                    txt: "Інше",
+                    go: "edu_trust_start"
+                }]
+            },
+            "step_disc": {
+                msg: `на одну штуку ціна фікс. але якщо візьмете дві — зроблю приємну знижку. вам скільки треба?`,
+                btns: [{
+                    txt: "Беру дві!",
+                    go: "step_bulk_options"
+                }, {
+                    txt: "Мені треба одна",
+                    go: "step_gift"
+                }]
+            },
+            "step_price": {
+                msg: `ціна на сайті актуальна, але товар закінчується. я ${t('відклав','відклала')} одну для вас.`,
+                btns: [{
+                    txt: "Бронюйте!",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Я подумаю",
+                    go: "edu_trust_start"
+                }]
+            },
+            "step_bulk_options": {
+                msg: `чудово! на опт є і знижка, і подарунок. що важливіше: більша знижка на товар, чи пріоритет на подарунок та доставку?`,
+                btns: [{
+                    txt: "Знижка на товар",
+                    go: "step_confirm_sale"
+                }, {
+                    txt: "Подарунок та доставка",
+                    go: "step_link_delivery"
+                }]
+            },
+            "step_confirm_sale": {
+                msg: `ок, тоді фіксуємо знижку. а ви бачили, що у нас діє <b>бонус на пакування</b>? ми його додаємо безкоштовно.`,
+                btns: [{
+                    txt: "Ок, оформлюйте",
+                    go: "step_link_delivery_bulk"
+                }]
+            },
+            "step_gift": {
+                msg: `ок, на одну можу додати <b>секретний подарунок</b>. 🎁 покладу його прямо в коробку.`,
+                btns: [{
+                    txt: "Супер, беру",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Які ще є варіанти?",
+                    go: "main_options"
+                }]
+            },
+            "step_link_delivery": {
+                msg: `супер! тепер давайте узгодимо доставку. вам на коли потрібно доставити? (це вплине на ціну)`,
+                btns: [{
+                    txt: "Треба швидко (на завтра)",
+                    go: "step_fast"
+                }, {
+                    txt: "Можна почекати",
+                    go: "step_slow"
+                }]
+            },
+            "step_link_delivery_bulk": {
+                msg: `прекрасно. ви зекономили! тепер доставка: вам на коли потрібно? (швидкість/ціна)`,
+                btns: [{
+                    txt: "Треба швидко (на завтра)",
+                    go: "step_fast"
+                }, {
+                    txt: "Можна почекати",
+                    go: "step_slow"
+                }]
+            },
+            "step_guar": {
+                msg: `ну, якщо чесно, вас турбує сама гарантія, чи те, що треба платити наперед?`,
+                btns: [{
+                    txt: "Оплата",
+                    go: "step_trust_payment"
+                }, {
+                    txt: "Сама гарантія",
+                    go: "step_trust_warranty"
+                }]
+            },
+            "step_trust_payment": {
+                msg: `Зрозумів. Ми відправляємо **наложкою** (оплата при отриманні). Ви перевіряєте якість товару на пошті, потім платите. <b>Жодних передоплат, ви нічого не втрачаєте.</b>`,
+                btns: [{
+                    txt: "Це безпечно, беру",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Є ще питання",
+                    go: "main_options"
+                }]
+            },
+            "step_trust_warranty": {
+                msg: `кожна посилка двічі перевіряється перед відправкою. наш рейтинг 4.7. вам це важливо?`,
+                btns: [{
+                    txt: "Дуже важливо",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Все зрозуміло",
+                    go: "main_options"
+                }]
+            },
+            "step_orig": {
+                msg: `звісно. ми офіційний партнер. жодних підробок, я за це відповідаю головою) ${t('даю','даю')} гарантію 12 міс.`,
+                btns: [{
+                    txt: "Переконали",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Є ще питання",
+                    go: "main_options"
+                }]
+            },
+            "step_lazy_yes": {
+                msg: `от і чудово) я теж не люблю бюрократію. просто скажете куди відправляти по телефону. 30 секунд і готово.`,
+                btns: [{
+                    txt: "Домовились",
+                    go: "fin_call_lazy"
+                }]
+            },
+            "step_lazy_no": {
+                msg: `ви герой! 💪 але зі мною надійніше — я бачу реальні залишки і відразу відкладу товар.`,
+                btns: [{
+                    txt: "Переконали",
+                    go: "fin_call_lazy"
+                }]
+            },
+            "step_comp_price": {
+                msg: `та я розумію, зараз скрізь економлять. але чи дають вони гарантію 12 міс і наложку? ми за якість відповідаємо рейтингом 4.7.`,
+                btns: [{
+                    txt: "Ви праві, якість важлива",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Все одно дорого",
+                    go: "step_disc"
+                }]
+            },
+            "step_comp_quality": {
+                msg: `плюсую. якість важливіша. наш товар перевіряється двічі перед відправкою.`,
+                btns: [{
+                    txt: "Оформлюйте",
+                    go: "step_link_delivery"
+                }, {
+                    txt: "Є ще питання",
+                    go: "main_options"
+                }]
+            },
+            "step_fast": {
+                msg: `так! я прямо зараз можу виписати накладну. це хвилина діла. у вас НП?`,
+                btns: [{
+                    txt: "Так, НП",
+                    go: "fin_np_ask"
+                }, {
+                    txt: "Ні, Укрпошта",
+                    go: "step_up_warn"
+                }]
+            },
+            "step_slow": {
+                msg: `зрозумів. тоді можна укрпоштою, там від 40 грн доставка. зекономите гроші)`,
+                btns: [{
+                    txt: "Давайте Укрпоштою",
+                    go: "fin_up_ask"
+                }, {
+                    txt: "Ні, краще НП",
+                    go: "fin_np_ask"
+                }]
+            },
+            "step_up_warn": {
+                msg: `Укрпошта сьогодні вже поїхала, відправимо завтра зранку. зате доставка дешевша. підходить?`,
+                btns: [{
+                    txt: "Так, нормально",
+                    go: "fin_up_ask"
+                }, {
+                    txt: "Ні, хочу НП",
+                    go: "fin_np_ask"
+                }]
+            },
+
+            "fin_np_ask": {
+                msg: `Супер! Швидка відправка. Вам зручніше оплатити картою (одразу) чи наложкою (при отриманні)?`,
+                btns: [{
+                    txt: "Картою",
+                    go: "fin_np_card"
+                }, {
+                    txt: "Наложкою",
+                    go: "fin_np"
+                }]
+            },
+            "fin_up_ask": {
+                msg: `Економна доставка. Вам зручніше оплатити картою (одразу) чи наложкою (при отриманні)?`,
+                btns: [{
+                    txt: "Картою",
+                    go: "fin_up_card"
+                }, {
+                    txt: "Наложкою",
+                    go: "fin_up"
+                }]
+            },
+
+            "edu_trust_start": {
+                msg: `добре, я не буду наполягати. але між нами, ви бачили наш рейтинг 4.7? я можу коротко розповісти, чому нам довіряють.`,
+                btns: [{
+                    txt: "Так, розкажіть",
+                    go: "edu_trust_rating"
+                }, {
+                    txt: "Ні, закрити чат",
+                    go: "close_chat"
+                }]
+            },
+            "edu_trust_rating": {
+                msg: `плюсую. ми не просто продаємо, ми перевіряємо кожну посилку ДВІЧІ. саме тому у нас 3392+ замовлень і 4.7 бали. вам це важливо?`,
+                btns: [{
+                    txt: "Дуже важливо",
+                    go: "fin_trust_close"
+                }, {
+                    txt: "Повернутись до питань",
+                    go: "main_options"
+                }]
+            },
+
+            "main_options": {
+                msg_list: [
+                    `Може ще якісь питання? Оберіть зі списку:`,
+                    `${currentManager.name} на зв'язку. Які ще деталі вас цікавлять?`,
+                    `Добре. Давайте закриємо всі інші питання. Що оберете далі?`
+                ],
+                btns: [{
+                    txt: "Про ціну / знижку",
+                    go: "branch_discount_start"
+                }, {
+                    txt: "Про доставку / терміни",
+                    go: "branch_speed_start"
+                }, {
+                    txt: "Гарантії / Довіра",
+                    go: "branch_trust_start"
+                }]
+            },
+            "branch_discount_start": {
+                msg: `тоді почнемо з ціни. оберіть варіант:`,
+                btns: [{
+                    txt: "Є знижка?",
+                    go: "step_disc"
+                }, {
+                    txt: "Ціна актуальна?",
+                    go: "step_price"
+                }]
+            },
+            "branch_speed_start": {
+                msg: `добре, обираємо доставку. оберіть:`,
+                btns: [{
+                    txt: "Встигаємо?",
+                    go: "step_fast"
+                }, {
+                    txt: "Мені не горить",
+                    go: "step_slow"
+                }]
+            },
+            "branch_trust_start": {
+                msg: `добре, з чого почнемо? (якість чи оплата?)`,
+                btns: [{
+                    txt: "Які гарантії?",
+                    go: "step_guar"
+                }, {
+                    txt: "Це оригінал?",
+                    go: "step_orig"
+                }]
+            },
+
+            "fin_reserve": {
+                msg: "домовились. бронь висить. <b>Введіть свій номер телефону у формі нижче, і я особисто Вам зателефоную</b>, щоб записати куди відправляти.",
+                btn: "📞 Підтвердити бронь"
+            },
+            "fin_soft_reserve": {
+                msg: "бронь поставив. <b>Введіть свій номер телефону у формі нижче</b>, щоб активувати замовлення.",
+                btn: "📞 Активувати бронь"
+            },
+            "fin_sale": {
+                msg: "круто! ви зекономите десь 100 грн. <b>Введіть свій номер телефону у формі нижче, і я особисто Вам зателефоную</b>, щоб все порахувати і набрати.",
+                btn: "📞 Оформити зі знижкою"
+            },
+            "fin_gift": {
+                msg: "клас. подарунок твій. <b>Введіть свій номер телефону у формі нижче</b>, я передзвоню і все узгодимо.",
+                btn: "🎁 Забрати з подарунком"
+            },
+            "fin_simple": {
+                msg: "Чудово. Залиште заявку — <b>Введіть свій номер телефону у формі нижче</b>, я передзвоню для уточнення відділення.",
+                btn: "📞 Оформити замовлення"
+            },
+            "fin_np": {
+                msg: "Супер! Машина скоро буде. <b>Введіть свій номер телефону у формі нижче, і я особисто Вам зателефоную</b>, щоб оформити миттєво.",
+                btn: "Швидка відправка"
+            },
+            "fin_up_switch": {
+                msg: "ок, укрпошта довше, але дешевше. якщо згодні почекати пару днів — <b>Введіть свій номер телефону у формі нижче</b>, оформлюємо!",
+                btn: "📞 Оформити Укрпоштою"
+            },
+            "fin_up": {
+                msg: "прийнято. я особисто запакую, щоб все доїхало цілим. <b>Введіть свій номер телефону у формі нижче.</b>",
+                btn: "✍️ Оформити доставку"
+            },
+            "fin_cod": {
+                msg: "безпека понад усе. оформлюю наложкою. <b>Введіть свій номер телефону у формі нижче</b>.",
+                btn: "🛡️ Замовити безпечно"
+            },
+            "fin_order": {
+                msg: "ви зробили правильний вибір. <b>Введіть свій номер телефону у формі нижче, і я особисто Вам зателефоную</b>, щоб швидко записати дані.",
+                btn: "📞 Оформити замовлення"
+            },
+            "fin_call_lazy": {
+                msg: "вже відкрив форму. <b>Введіть свій номер телефону у формі нижче</b>, я вас наберу (це швидше, ніж диктувати!) 😉",
+                btn: "📞 Замовити дзвінок"
+            },
+            "fin_trust_close": {
+                msg: `я ${t('радий','рада')}, що ми порозумілись. <b>Введіть свій номер телефону у формі нижче</b>, і я наберу вас, щоб оформити замовлення.`,
+                btn: "📞 Оформити (Trust)"
+            },
+            "close_chat": {
+                msg: "На все добре! 👋",
+                btn: "Закрити чат"
+            },
+            "fin_wait_later": {
+                msg: "ок, я вас почув. якщо передумаєте - пишіть, я тут до 20:00. гарного дня!👋",
+                btn: "Закрити чат"
+            },
+            "fin_np_card": {
+                msg: `супер! оплата картою при отриманні. це ${t('робить','робить')} процес максимально швидким. <b>Введіть свій номер телефону у формі нижче</b>, я вас наберу.`,
+                btn: "💳 Оформити картою"
+            },
+            "fin_up_card": {
+                msg: `чудово. оплата картою при отриманні. я ${t('оформлюю','оформлюю')} накладну. <b>Введіть свій номер телефону у формі нижче</b>.`,
+                btn: "💳 Оформити картою"
+            }
+        };
+
+        const START_KEYS = ["root_scarce", "root_discount", "root_speed", "root_trust", "root_lazy", "root_just_look", "root_compare"];
+        const RANDOM_START_KEY = START_KEYS[Math.floor(Math.random() * START_KEYS.length)];
+        let currentDialogue = DIALOG_DB[RANDOM_START_KEY];
+        let lastActiveStepKey = 'start';
+
+        document.addEventListener("DOMContentLoaded", function() {
+            if (localStorage.getItem('order_success_flag')) return;
+
+            const imgEl = document.getElementById('tr-avatar-img');
+            const imgWin = document.getElementById('win-avatar-img');
+            const nameEl = document.getElementById('win-manager-name');
+            const trText = document.getElementById('tr-text-dynamic');
+
+            if (!imgEl) return;
+
+            const RANDOM_AVATAR_ID = Math.floor(Math.random() * MANAGERS.length);
+            currentManager = MANAGERS[RANDOM_AVATAR_ID];
+
+            const randomStartKey = START_KEYS[Math.floor(Math.random() * START_KEYS.length)];
+            currentDialogue = DIALOG_DB[randomStartKey];
+            const initialMessageKey = START_PHRASE_MAP[randomStartKey] || TRIGGER_TEXTS[Math.floor(Math.random() * TRIGGER_TEXTS.length)];
+
+            imgEl.src = currentManager.img;
+            imgWin.src = currentManager.img;
+            nameEl.innerText = currentManager.name;
+            trText.innerText = initialMessageKey;
+
+
+            setTimeout(() => {
+                const trig = document.getElementById('cons-trigger');
+                if (trig) {
+                    trig.classList.add('is-visible');
+                    var audio = document.getElementById('cons-sound');
+                    if (audio) {
+                        var playPromise = audio.play();
+                        if (playPromise !== undefined) {
+                            playPromise.catch(function(error) {
+                                // console.log("Audio autoplay blocked by browser policy");
+                            });
+                        }
+                    }
+                }
+            }, CONS_START_DELAY);
+        });
+
+        window.openConsChat = function() {
+            document.getElementById('cons-trigger').classList.remove('is-visible');
+            document.getElementById('cons-window').classList.add('is-open');
+            document.getElementById('cons-overlay').classList.add('is-active');
+
+            if (!currentDialogue) {
+                console.error("SalesWolf Fatal Error: No starting dialogue context found.");
+                return;
+            }
+
+            if (!isChatStarted) {
+                isChatStarted = true;
+                renderFAQ();
+                runStep(currentDialogue);
+            }
+        };
+        window.closeConsChat = function() {
+            document.getElementById('cons-window').classList.remove('is-open');
+            document.getElementById('cons-overlay').classList.remove('is-active');
+
+            isChatStarted = false;
+
+            document.getElementById('tr-text-dynamic').innerText = '';
+
+            setTimeout(() => document.getElementById('cons-trigger').classList.add('is-visible'), 300);
+            clearTimeout(idleTimer);
+        };
+        window.acceptCall = function() {
+            window.closeConsChat();
+            const formEl = document.querySelector('#order-card form, #order-block form, .order-form');
+            if (formEl) {
+                formEl.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center'
+                });
+                const phoneField = formEl.querySelector('input[type="tel"], input[name*="phone"]');
+                if (phoneField) phoneField.focus();
+            } else {
+                window.scrollTo({
+                    top: document.body.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }
+        };
+
+        window.continueConsultation = async function() {
+            document.getElementById('cons-options-area').innerHTML = '';
+            document.getElementById('cons-chips-area').innerHTML = '';
+            await wait(500);
+            lastActiveStepKey = 'main_options';
+            runStep(DIALOG_DB['main_options']);
+        }
+
+        window.handleOption = async function(nextKey, btnText) {
+            clearTimeout(idleTimer);
+            document.getElementById('cons-options-area').innerHTML = '';
+            document.getElementById('cons-chips-area').innerHTML = '';
+            addMsg(btnText, 'user');
+
+            const nextStepData = DIALOG_DB[nextKey];
+
+            if (!nextStepData) {
+                console.error("SalesWolf Error: Unknown dialogue step key:", nextKey);
+                runStep(DIALOG_DB['main_options']);
+                return;
+            }
+
+            if (nextStepData.btns) {
+                await wait(500);
+                runStep(nextStepData);
+            } else if (nextStepData.btn) {
+                if (nextKey === 'fin_wait_later' || nextKey === 'close_chat') {
+                    window.closeConsChat();
+                    return;
+                }
+
+                await wait(600);
+                await smartTyping(nextStepData.msg);
+                addMsg(nextStepData.msg, 'manager');
+
+                document.getElementById('cons-options-area').innerHTML = `
+                <button class="cons-opt-btn primary" onclick="acceptCall()">${nextStepData.btn}</button>
+                <button class="cons-opt-btn secondary" onclick="continueConsultation()">💡 У мене є ще питання</button>
+            `;
+                lastActiveStepKey = 'main_options';
+            }
+        };
+
+        async function runStep(stepData) {
+            if (!stepData) return;
+
+            let messageToSend = stepData.msg;
+            if (stepData.msg_list) {
+                messageToSend = stepData.msg_list[Math.floor(Math.random() * stepData.msg_list.length)];
+            }
+
+            await smartTyping(messageToSend);
+            addMsg(messageToSend, 'manager');
+
+            if (stepData.btns) {
+                await wait(300);
+                showButtons(stepData.btns);
+                startIdleTimer();
+            }
+        }
+
+        window.handleFAQ = async function(index) {
+            clearTimeout(idleTimer);
+            const faq = FAQ_CHIPS[index];
+            addMsg(faq.label, 'user');
+
+            await wait(400);
+            await smartTyping(faq.reply);
+            addMsg(faq.reply, 'manager');
+
+            await wait(800);
+
+            const recallData = DIALOG_DB[lastActiveStepKey];
+
+            if (recallData && recallData.btns && lastActiveStepKey !== 'main_options' && !lastActiveStepKey.startsWith('root_')) {
+                const recallMsg = `А повертаючись до нашої розмови... ${currentManager.name} ${t('хотів','хотіла')} дізнатися наступне:`;
+
+                await smartTyping(recallMsg);
+                addMsg(recallMsg, 'manager');
+
+                await wait(300);
+                showButtons(recallData.btns);
+                startIdleTimer();
+            } else {
+                runStep(DIALOG_DB['main_options']);
+            }
+        };
+
+        function startIdleTimer() {
+            clearTimeout(idleTimer);
+            const phrases = ["ви тут? 👀", "може я щось не так пояснив?", "чекаю на вас...", "товар відклав...", "тисну кнопку, якщо що..."];
+            idleTimer = setTimeout(async () => {
+                const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+                await smartTyping(phrase);
+                addMsg(phrase, 'manager');
+            }, 20000);
+        }
+
+        async function smartTyping(text) {
+            const charTime = 18 + Math.random() * 8;
+            const duration = Math.min(600 + (text.length * charTime), 3000);
+
+            const feed = document.getElementById('cons-chat-feed');
+            if (!feed) return;
+            const div = document.createElement('div');
+            div.className = 'msg-row manager';
+            div.innerHTML = `<div class="typing-indicator-bubble"><div class="tib-dot"></div><div class="tib-dot"></div><div class="tib-dot"></div></div>`;
+            feed.appendChild(div);
+            feed.scrollTop = feed.scrollHeight;
+
+            await wait(duration);
+            div.remove();
+        }
+
+        function addMsg(text, type) {
+            const feed = document.getElementById('cons-chat-feed');
+            if (!feed) return;
+            const d = new Date();
+            const time = d.getHours() + ":" + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+            const check = `<svg class="msg-check" viewBox="0 0 24 24"><path d="M20.285 2l-11.285 11.561-5.286-5.011-3.714 3.716 9 8.728 15-15.285z"/></svg>`;
+            const checks = type === 'user' ? `<div style="display:flex;">${check}${check}</div>` : '';
+            const meta = `<div class="msg-meta"><span class="msg-time">${time}</span>${checks}</div>`;
+
+            const row = document.createElement('div');
+            row.className = `msg-row ${type}`;
+            row.innerHTML = `<div class="msg-bubble">${escapeHtml(text)}${meta}</div>`;
+
+            feed.appendChild(row);
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        function showButtons(btns) {
+            let html = '';
+            btns.forEach((b, i) => {
+                html += `<button class="cons-opt-btn" style="animation-delay:${i*0.05}s" onclick="handleOption('${b.go}', '${b.txt}')">${b.txt}</button>`;
+            });
+            document.getElementById('cons-options-area').innerHTML = html;
+        }
+
+        function renderFAQ() {
+            let html = '';
+            FAQ_CHIPS.forEach((chip, i) => {
+                html += `<div class="cons-chip" onclick="window.handleFAQ(${i})">${chip.label}</div>`;
+            });
+            document.getElementById('cons-chips-area').innerHTML = html;
+        }
+
+        function wait(ms) {
+            return new Promise(r => setTimeout(r, ms));
+        }
+
+        window.handleFAQ = handleFAQ;
+        window.handleOption = handleOption;
+        window.acceptCall = acceptCall;
+        window.continueConsultation = continueConsultation;
+        window.openConsChat = openConsChat;
+        window.closeConsChat = closeConsChat;
+
+    } catch (e) {
+        console.error("Sales Fatal Error at Top Level:", e);
+    }
+})();

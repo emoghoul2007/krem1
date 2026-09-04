@@ -1,0 +1,167 @@
+/* Крос-сел (усі дизайни): вибір рекомендованих товарів -> додаються до поточного замовлення.
+ * design8: оновлює .d8-sheet__sum b (стара ціна як <del> усередині).
+ * design7: три окремі елементи #order-total / #order-old-total / #order-discount;
+ *          через MutationObserver накладаємо крос-сел поверх перерахунку к-сті (updatePriceDOM у IIFE недоступна).
+ * Вибране пишеться в addon_products (JSON) -> functions.php дописує в $products_list CRM. */
+(function () {
+  "use strict";
+  document.addEventListener("DOMContentLoaded", function () {
+    var btns = [].slice.call(document.querySelectorAll(".js-xsell-add"));
+    if (!btns.length) return;
+    var selected = {};
+
+    function orderForm() {
+      return document.querySelector("#order_form form.wpcf7-form") ||
+             document.querySelector("#order_form .wpcf7-form") ||
+             document.querySelector(".wpcf7-form") || null;
+    }
+    function hiddenField() {
+      var f = orderForm(); if (!f) return null;
+      var inp = f.querySelector('input[name="addon_products"]');
+      if (!inp) { inp = document.createElement("input"); inp.type = "hidden"; inp.name = "addon_products"; f.appendChild(inp); }
+      return inp;
+    }
+    function num(el) { return el ? (parseInt((el.textContent || "").replace(/[^0-9]/g, ""), 10) || 0) : 0; }
+    function sums() {
+      var list = Object.keys(selected).map(function (k) { return selected[k]; });
+      var sn = list.reduce(function (a, x) { return a + x.price * x.count; }, 0);
+      var so = list.reduce(function (a, x) { return a + (x.old > x.price ? x.old : x.price) * x.count; }, 0);
+      return { list: list, sn: sn, so: so };
+    }
+
+    // ---- визначення розкладки ----
+    var d8El   = document.querySelector(".d8-sheet__sum b");
+    var d7Total = document.getElementById("order-total");
+    var d7Old   = document.getElementById("order-old-total");
+    var d7Disc  = document.getElementById("order-discount");
+    var isD7 = !d8El && d7Total && (d7Old || d7Disc);
+
+    // ---- стан design8 ----
+    var origSum = "", d8New = 0, d8Old = 0, d8cur = " грн";
+    if (d8El) {
+      origSum = d8El.innerHTML; var t = d8El.textContent || "";
+      d8cur = /₴/.test(t) ? " ₴" : " грн";
+      var del = d8El.querySelector("del");
+      d8Old = del ? (parseInt(del.textContent.replace(/[^0-9]/g, ""), 10) || 0) : 0;
+      var cl = d8El.cloneNode(true); var d2 = cl.querySelector("del"); if (d2) d2.remove();
+      d8New = parseInt((cl.textContent || "").replace(/[^0-9]/g, ""), 10) || 0;
+    }
+    function renderD8() {
+      var s = sums();
+      if (s.sn > 0 && d8New > 0) {
+        var nt = d8New + s.sn, ot = (d8Old || d8New) + s.so;
+        d8El.innerHTML = (ot > nt ? "<del>" + ot + "</del> " : "") + nt + d8cur;
+      } else { d8El.innerHTML = origSum; }
+    }
+
+    // ---- стан design7 ----
+    var d7cur = (window.design7_Data && window.design7_Data.currency) ? window.design7_Data.currency : "₴";
+    var bNew = 0, bOld = 0, bDisc = 0, applying = false;
+    function readD7Base() { bNew = num(d7Total); bOld = num(d7Old); bDisc = num(d7Disc); }
+    function renderD7() {
+      var s = sums();
+      applying = true;
+      var sb = document.querySelector(".sb-price");
+      if (s.sn <= 0) {
+        d7Total.innerText = bNew + d7cur;
+        if (d7Old) { d7Old.innerText = bOld + d7cur; if (d7Old.parentElement) d7Old.parentElement.style.display = (bOld > bNew) ? "flex" : "none"; }
+        if (d7Disc) { if (bDisc > 0) { d7Disc.innerText = "-" + bDisc + "%"; d7Disc.style.display = "inline-block"; } else { d7Disc.style.display = "none"; } }
+        if (sb) sb.innerText = bNew + d7cur;
+      } else {
+        var nt = bNew + s.sn, ot = (bOld || bNew) + s.so;
+        var disc = (ot > nt) ? Math.round((1 - nt / ot) * 100) : 0;
+        d7Total.innerText = nt + d7cur;
+        if (d7Old) { d7Old.innerText = ot + d7cur; if (d7Old.parentElement) d7Old.parentElement.style.display = (ot > nt) ? "flex" : "none"; }
+        if (d7Disc) { if (disc > 0) { d7Disc.innerText = "-" + disc + "%"; d7Disc.style.display = "inline-block"; } else { d7Disc.style.display = "none"; } }
+        if (sb) sb.innerText = nt + d7cur;
+      }
+      setTimeout(function () { applying = false; }, 0);
+    }
+    if (isD7) {
+      readD7Base();
+      var obs = new MutationObserver(function () {
+        if (applying) return;   // ігноруємо власні записи
+        readD7Base();           // тема записала чисту базу (зміна к-сті) -> перечитуємо
+        if (sums().sn > 0) renderD7();
+      });
+      obs.observe(d7Total, { childList: true, subtree: true, characterData: true });
+    }
+
+    function sync() {
+      var s = sums();
+      var inp = hiddenField(); if (inp) inp.value = s.list.length ? JSON.stringify(s.list) : "";
+      if (d8El) renderD8();
+      else if (isD7) renderD7();
+    }
+    function keyOf(b) { return (b.getAttribute("data-xid") || "") + "|" + (b.getAttribute("data-xname") || ""); }
+
+    btns.forEach(function (b) {
+      b.addEventListener("click", function () {
+        var k = keyOf(b), on = b.getAttribute("aria-pressed") === "true";
+        if (on) { delete selected[k]; b.setAttribute("aria-pressed", "false"); b.classList.remove("is-added"); }
+        else {
+          selected[k] = {
+            product_id: b.getAttribute("data-xid") || "", name: b.getAttribute("data-xname") || "",
+            price: parseFloat(b.getAttribute("data-xprice")) || 0, old: parseFloat(b.getAttribute("data-xold")) || 0, count: 1
+          };
+          b.setAttribute("aria-pressed", "true"); b.classList.add("is-added");
+        }
+        sync();
+      });
+    });
+
+    // --- Карусель (товарів > 3): нескінченне зациклення ротацією DOM (без пустих місць) ---
+    [].slice.call(document.querySelectorAll(".xsell--carousel")).forEach(function (sec) {
+      var track = sec.querySelector(".xsell__track");
+      if (!track || track.children.length < 2) return;
+      var prev = sec.querySelector(".xsell__nav--prev");
+      var next = sec.querySelector(".xsell__nav--next");
+      var animating = false;
+
+      function step() {
+        var first = track.firstElementChild; if (!first) return 0;
+        var cs = getComputedStyle(track);
+        var gap = parseFloat(cs.columnGap || cs.gap || "10") || 10;
+        return first.getBoundingClientRect().width + gap;
+      }
+      function goNext() {
+        if (animating) return; animating = true;
+        var dx = step();
+        track.style.transition = "transform .55s cubic-bezier(0.22, 1, 0.36, 1)";
+        track.style.transform = "translateX(" + (-dx) + "px)";
+        var done = function () {
+          track.removeEventListener("transitionend", done);
+          track.style.transition = "none";
+          track.appendChild(track.firstElementChild);   // перший -> в кінець
+          track.style.transform = "translateX(0)";
+          void track.offsetWidth;                        // reflow
+          animating = false;
+        };
+        track.addEventListener("transitionend", done);
+      }
+      function goPrev() {
+        if (animating) return; animating = true;
+        var dx = step();
+        track.style.transition = "none";
+        track.insertBefore(track.lastElementChild, track.firstElementChild); // останній -> на початок
+        track.style.transform = "translateX(" + (-dx) + "px)";
+        void track.offsetWidth;                          // reflow
+        track.style.transition = "transform .55s cubic-bezier(0.22, 1, 0.36, 1)";
+        track.style.transform = "translateX(0)";
+        var done = function () { track.removeEventListener("transitionend", done); animating = false; };
+        track.addEventListener("transitionend", done);
+      }
+      if (next) next.addEventListener("click", goNext);
+      if (prev) prev.addEventListener("click", goPrev);
+
+      // свайп на тач-екранах
+      var sx = null;
+      track.addEventListener("touchstart", function (e) { sx = e.touches[0].clientX; }, { passive: true });
+      track.addEventListener("touchend", function (e) {
+        if (sx === null) return;
+        var d = e.changedTouches[0].clientX - sx; sx = null;
+        if (Math.abs(d) > 40) { if (d < 0) goNext(); else goPrev(); }
+      }, { passive: true });
+    });
+  });
+})();
