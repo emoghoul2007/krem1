@@ -478,5 +478,37 @@ document.addEventListener("DOMContentLoaded", function() {
 <script id="crosssell-js" src="./Крем Zerong – nirvanaa_files/crosssell.js.Без названия"></script>
 <script id="swiper-js-js" src="./Крем Zerong – nirvanaa_files/swiper-bundle.min.js.Без названия"></script>
 
+<script>
+function submitOrder() {
+    let name = document.getElementById('proxy-name').value;
+    let phone = document.getElementById('proxy-phone').value;
+    let qty = window.selectedQty || 1; 
+
+    if (!name || !phone) {
+        alert("Будь ласка, заповніть ім'я та телефон");
+        return;
+    }
+
+    fetch('/api/send', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: name, phone: phone, quantity: qty })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Дякуємо! Замовлення успішно оформлено.');
+        } else {
+            alert('Сталася помилка, спробуйте ще раз.');
+        }
+    })
+    .catch(error => {
+        console.error('Помилка мережі:', error);
+    });
+}
+</script>
+
 </body>
 </html>
