@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Разрешаем CORS, чтобы ваш сайт мог отправлять сюда запросы
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -13,25 +12,26 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Получаем данные из формы сайта
     const { name, phone, quantity } = req.body;
 
     if (!name || !phone) {
       return res.status(400).json({ error: "Ім'я та телефон обов'язкові" });
     }
 
-    // Данные для отправки в LP-CRM (ключ берется из переменных окружения Vercel)
+    // Проверяем, подставился ли ключ
+    if (!process.env.LP_CRM_API_KEY) {
+      console.error('Помилка: не задано LP_CRM_API_KEY в переменных Vercel');
+    }
+
     const crmData = new URLSearchParams({
-      key: process.env.LP_CRM_API_KEY, // Скрытый ключ
+      key: process.env.LP_CRM_API_KEY,
       b_name: name,
       b_phone: phone,
-      // Добавьте структуру продуктов согласно API вашей CRM
       'products[0][product_id]': '7',
       'products[0][quantity]': quantity || 1,
       'products[0][price]': '299'
     });
 
-// Отправляем запрос в вашу персональную LP-CRM с серверов Vercel
     const crmResponse = await fetch('https://deltafund.lp-crm.biz/api/v1/order/create', {
       method: 'POST',
       body: crmData,
@@ -41,10 +41,15 @@ export default async function handler(req, res) {
     });
 
     const result = await crmResponse.json();
+    
+    // Выводим ответ CRM в консоль Vercel для отладки
+    console.log('Відповідь від LP-CRM:', result);
 
-    return res.status(200).json({ success: true, result });
+    // Возвращаем реальный результат от CRM клиенту
+    return res.status(200).json(result);
+
   } catch (error) {
     console.error('Помилка відправки в CRM:', error);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', details: error.message });
   }
 }
