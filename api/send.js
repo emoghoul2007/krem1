@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     }
 
     // Вставляем ключ напрямую в кавычках
-    const crmApiKey = '08c25759ce916fd564d7e4ff53dacf72';
+    const crmApiKey = '956efca4ce7e479e31aa80a6ad60088d';
 
     const crmData = new URLSearchParams({
       key: crmApiKey,
