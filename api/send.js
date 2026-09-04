@@ -18,13 +18,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Ім'я та телефон обов'язкові" });
     }
 
-    // Проверяем, подставился ли ключ
-    if (!process.env.LP_CRM_API_KEY) {
-      console.error('Помилка: не задано LP_CRM_API_KEY в переменных Vercel');
-    }
+    // Вставляем ключ напрямую в кавычках
+    const crmApiKey = '08c25759ce916fd564d7e4ff53dacf72';
 
     const crmData = new URLSearchParams({
-      key: process.env.LP_CRM_API_KEY,
+      key: crmApiKey,
       b_name: name,
       b_phone: phone,
       'products[0][product_id]': '7',
@@ -41,11 +39,8 @@ export default async function handler(req, res) {
     });
 
     const result = await crmResponse.json();
-    
-    // Выводим ответ CRM в консоль Vercel для отладки
     console.log('Відповідь від LP-CRM:', result);
 
-    // Возвращаем реальный результат от CRM клиенту
     return res.status(200).json(result);
 
   } catch (error) {
