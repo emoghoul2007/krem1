@@ -1,0 +1,13 @@
+{
+  "name": "krem1",
+  "version": "1.0.0",
+  "description": "Landing page with Vercel Analytics",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Static HTML - no build required'"
+  },
+  "dependencies": {
+    "@vercel/analytics": "^1.4.1"
+  }
+}
