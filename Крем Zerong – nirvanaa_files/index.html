@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="uk">
 <head>
@@ -43,7 +44,6 @@
     <link rel="stylesheet" id="acft-gf-css" href="./Крем Zerong – nirvanaa_files/css" media="all">
     <link rel="stylesheet" id="contact-form-7-css" href="./Крем Zerong – nirvanaa_files/styles.css" media="all">
     <link rel="stylesheet" id="custom-features-style-css" href="./Крем Zerong – nirvanaa_files/custom-features.css" media="all">
-    <link rel="stylesheet" id="crosssell-css" href="./Крем Zerong – nirvanaa_files/crosssell.css" media="all">
     <link rel="stylesheet" id="swiper-css-css" href="./Крем Zerong – nirvanaa_files/swiper-bundle.min.css" media="all">
     <link rel="stylesheet" id="land-7-css-amber-css" href="./Крем Zerong – nirvanaa_files/land-7a.css" media="all">
     
@@ -475,8 +475,39 @@ document.addEventListener("DOMContentLoaded", function() {
 </script>
 
 <script id="design-7-js-js" src="./Крем Zerong – nirvanaa_files/design7.js.Без названия"></script>
-<script id="crosssell-js" src="./Крем Zerong – nirvanaa_files/crosssell.js.Без названия"></script>
 <script id="swiper-js-js" src="./Крем Zerong – nirvanaa_files/swiper-bundle.min.js.Без названия"></script>
+
+<script>
+function submitOrder() {
+    let name = document.getElementById('proxy-name').value;
+    let phone = document.getElementById('proxy-phone').value;
+    let qty = window.selectedQty || 1; 
+
+    if (!name || !phone) {
+        alert("Будь ласка, заповніть ім'я та телефон");
+        return;
+    }
+
+    fetch('/api/send', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: name, phone: phone, quantity: qty })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Дякуємо! Замовлення успішно оформлено.');
+        } else {
+            alert('Сталася помилка, спробуйте ще раз.');
+        }
+    })
+    .catch(error => {
+        console.error('Помилка мережі:', error);
+    });
+}
+</script>
 
 </body>
 </html>
