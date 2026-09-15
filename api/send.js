@@ -10,8 +10,9 @@ export default async function handler(req, res) {
     }
 
     try {
-        // URL вашего развернутого веб-приложения Google Apps Script
-        const scriptUrl = process.env.GOOGLE_SCRIPT_URL; 
+        // URL вашого розгорнутого веб-застосунку Google Apps Script
+        // (той самий, що вже використовується в проєкті krem1 — залишаємо без змін)
+        const scriptUrl = process.env.GOOGLE_SCRIPT_URL;
 
         const response = await fetch(scriptUrl, {
             method: 'POST',
