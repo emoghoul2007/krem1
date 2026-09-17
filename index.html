@@ -354,53 +354,58 @@ src="https://www.facebook.com/tr?id=1083455870937803&ev=PageView&noscript=1"
 
   <!-- Order submit -> /api/send -> Google Apps Script -> Google Sheet + LP-CRM -->
   <script>
-    function submitOrder() {
-        var nameEl = document.getElementById('proxy-name');
-        var phoneEl = document.getElementById('proxy-phone');
-        var qtyEl = document.getElementById('product_data');
-        var btn = document.getElementById('submit-btn');
+function submitOrder() {
+    var nameEl = document.getElementById('proxy-name');
+    var phoneEl = document.getElementById('proxy-phone');
+    var qtyEl = document.getElementById('product_data');
+    var btn = document.getElementById('submit-btn');
 
-        var name = nameEl.value.trim();
-        var phone = phoneEl.value.trim();
-        var quantity = parseInt(qtyEl.value, 10) || 1;
+    var name = nameEl.value.trim();
+    var phone = phoneEl.value.trim();
+    var quantity = parseInt(qtyEl.value, 10) || 1;
 
-        if (!name || !phone) {
-            alert("Будь ласка, заповніть ім'я та телефон");
-            return;
-        }
-        if ($(phoneEl).inputmask && !$(phoneEl).inputmask("isComplete")) {
-            alert("Введіть повний номер телефону.");
-            return;
-        }
-
-        btn.disabled = true;
-        btn.textContent = "Надсилаємо...";
-
-        fetch('/api/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, phone: phone, quantity: quantity })
-        })
-        .then(function (response) { return response.json(); })
-        .then(function (data) {
-            if (data.success) {
-                if (window.fbq) fbq('track', 'Lead');
-                alert('Дякуємо! Замовлення успішно оформлено.');
-                nameEl.value = '';
-                phoneEl.value = '';
-            } else {
-                alert('Сталася помилка, спробуйте ще раз.');
-            }
-        })
-        .catch(function (error) {
-            console.error('Помилка мережі:', error);
-            alert('Сталася помилка мережі, спробуйте ще раз.');
-        })
-        .finally(function () {
-            btn.disabled = false;
-            btn.textContent = 'Зробити замовлення';
-        });
+    if (!name || !phone) {
+        alert("Будь ласка, заповніть ім'я та телефон");
+        return;
     }
+    if ($(phoneEl).inputmask && !$(phoneEl).inputmask("isComplete")) {
+        alert("Введіть повний номер телефону.");
+        return;
+    }
+
+    // генерируем один общий event_id на этот конкретный заказ
+    var eventId = 'lead_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+
+    btn.disabled = true;
+    btn.textContent = "Надсилаємо...";
+
+    fetch('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, phone: phone, quantity: quantity, eventId: eventId })
+    })
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
+        if (data.success) {
+            if (window.fbq) {
+                fbq('track', 'Lead', {}, { eventID: eventId });
+            }
+            alert('Дякуємо! Замовлення успішно оформлено.');
+            nameEl.value = '';
+            phoneEl.value = '';
+        } else {
+            alert('Сталася помилка, спробуйте ще раз.');
+        }
+    })
+    .catch(function (error) {
+        console.error('Помилка мережі:', error);
+        alert('Сталася помилка мережі, спробуйте ще раз.');
+    })
+    .finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Зробити замовлення';
+    });
+}
   </script>
 
 </body></html>
